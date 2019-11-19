@@ -1,6 +1,18 @@
+#################
+## Definitions ##
+#################
+
 sort node
 sort view
 sort quorum
+sort state
+
+immutable constant initial_view: view
+immutable constant normal_state: state
+immutable constant vc_state: state
+
+immutable relation eq(state, state)
+axiom eq(A, A) # reflexivity
 
 immutable relation le(view, view)
 
@@ -22,28 +34,70 @@ axiom forall Q1, Q2. exists N. member(N, Q1) & member(N, Q2)
 immutable relation primary_of_view(node, view)
 axiom primary_of_view(M, V) & primary_of_view(N, V) -> M = N
 
-# relation tracking which nodes have sent view changes
-mutable relation sent_view_change(node, view)
-mutable function sent_view_change_quorum(view): quorum
+# the state of the node in the given view
+mutable function node_state(node, view): state
 
-# initially, nobody has sent a view change
-init !sent_view_change(N, V)
+# the node has sent StartViewChange for the view
+mutable relation sent_start_vc(node, view)
+# a quorum has been reached for StartViewChange to view
+mutable function start_vc_quorum(view): quorum
 
-# we can always transition by having a node decide to start a view change
+# the node has sent DoViewChange for the view
+mutable relation sent_do_vc(node, view)
+# a quorum has been reached for DoViewChange to view
+mutable function do_vc_quorum(view): quorum
+
+mutable relation sent_start_view(node, view)
+
+####################
+## Initialization ##
+####################
+
+# every node is in the normal state
+init node_state(N, initial_view) = normal_state
+# nobody has sent a StartViewChange
+init !sent_start_vc(N, V)
+# nobody has sent a DoViewChange
+init !sent_do_vc(N, V)
+
+#################
+## Transitions ##
+#################
+
+# we can always transition by having a node decide to start a view change, regardless of state
 # this corresponds to a replica sending out a StartViewChange message because of a timeout
 transition send_start_view_change(n: node, v: view)
-  modifies sent_view_change
-  (forall N, V. sent_view_change(N, V) <-> old(sent_view_change(N, V)) | N = n & V = v)
+  modifies sent_start_vc, node_state
+  (forall N, V. sent_start_vc(N, V) <-> old(sent_start_vc(N, V)) | N = n & V = v) &
+  node_state(n, v) = vc_state
 
 # when we have a majority of nodes having sent a StartViewChange, we can actually start one!
 transition start_view_change(v: view, q: quorum)
-  modifies sent_view_change_quorum
-  (forall N. member(N, q) -> old(sent_view_change(N, v))) &
-  sent_view_change_quorum(v) = q
+  modifies start_vc_quorum
+  (forall N. member(N, q) -> old(sent_start_vc(N, v))) &
+  start_vc_quorum(v) = q
 
+# a node recognizes the quorum of sent_view_change and indicates the view change should be performed
 # this corresponds to a replica sending out a DoViewChange message
-# transition do_view_change(...)
+transition send_do_view_change(n: node, v: view)
+  modifies sent_do_vc
+  member(n, old(start_vc_quorum(v))) & 
+  (forall N, V. sent_do_vc(N, V) <-> old(sent_do_vc(N, V)) | N = n & V = v)
 
-# transition to the new view since we have a majority
+# when we have a majority of nodes having sent a DoViewChange, we can actually do one!
+transition do_view_change(v: view, q: quorum)
+  modifies do_vc_quorum
+  (forall N. member(N, q) -> old(sent_do_vc(N, v))) &
+  do_vc_quorum(v) = q
+
+# if we have a quorum of DoViewChange messages, the node can actually move to the new view
 # this corresponds to a replica sending out a StartView message
-# transition start_view(...)
+transition send_start_view(n: node, v: view)
+  modifies sent_start_view
+  member(n, old(do_vc_quorum(v))) &
+  (forall N, V. sent_start_view(N, V) <-> old(sent_start_view(N, V)) | N = n & V = v)
+
+# when we have a majority of nodes having sent a StartView, we can finally start the new view!
+transition start_view(v: view, q: quorum)
+  modifies node_state
+  (forall N. member(N, q) -> old(sent_do_vc(N, v)) & node_state(N, v) = normal_state)
