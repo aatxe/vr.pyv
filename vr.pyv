@@ -1,0 +1,49 @@
+sort node
+sort view
+sort quorum
+
+immutable relation le(view, view)
+
+# le is a total ordering
+axiom le(A, A) # reflexivity
+axiom le(A, B) & le(B, A) -> A = B # antisymmetry
+axiom le(A, B) & le(B, C) -> le(A, C) # transitivity
+axiom le(A, B) | le(B, A) # connexity
+
+# quorums are defined by their membership
+immutable relation member(node, quorum)
+
+# there is always a common node between two quorums
+# thus, every quorum must consist of a simple majority of nodes
+axiom forall Q1, Q2. exists N. member(N, Q1) & member(N, Q2)
+
+# is this node the primary node of the specified view?
+# in a real implementation, this is implemented as something like view `mod` |node|.
+immutable relation primary_of_view(node, view)
+axiom primary_of_view(M, V) & primary_of_view(N, V) -> M = N
+
+# relation tracking which nodes have sent view changes
+mutable relation sent_view_change(node, view)
+mutable function sent_view_change_quorum(view): quorum
+
+# initially, nobody has sent a view change
+init !sent_view_change(N, V)
+
+# we can always transition by having a node decide to start a view change
+# this corresponds to a replica sending out a StartViewChange message because of a timeout
+transition send_start_view_change(n: node, v: view)
+  modifies sent_view_change
+  (forall N, V. sent_view_change(N, V) <-> old(sent_view_change(N, V)) | N = n & V = v)
+
+# when we have a majority of nodes having sent a StartViewChange, we can actually start one!
+transition start_view_change(v: view, q: quorum)
+  modifies sent_view_change_quorum
+  (forall N. member(N, q) -> old(sent_view_change(N, v))) &
+  sent_view_change_quorum(v) = q
+
+# this corresponds to a replica sending out a DoViewChange message
+# transition do_view_change(...)
+
+# transition to the new view since we have a majority
+# this corresponds to a replica sending out a StartView message
+# transition start_view(...)
