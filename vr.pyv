@@ -2,12 +2,22 @@
 ## Definitions ##
 #################
 
+# a request from a client
+sort req
+# a response from the protocol
+sort resp
+
+# a node participating in the protocol
 sort node
+# a view in the protocol
 sort view
+# a majority of nodes
 sort quorum
+# a node state, either normal or view change
 sort state
 
 immutable constant initial_view: view
+
 immutable constant normal_state: state
 immutable constant vc_state: state
 
@@ -22,6 +32,14 @@ axiom le(A, B) & le(B, A) -> A = B # antisymmetry
 axiom le(A, B) & le(B, C) -> le(A, C) # transitivity
 axiom le(A, B) | le(B, A) # connexity
 
+immutable relation le_req(req, req)
+
+# le_req is a total ordering
+axiom le_req(A, A) # reflexivity
+axiom le_req(A, B) & le_req(B, A) -> A = B # antisymmetry
+axiom le_req(A, B) & le_req(B, C) -> le_req(A, C) # transitivity
+axiom le_req(A, B) | le_req(B, A) # connexity
+
 # quorums are defined by their membership
 immutable relation member(node, quorum)
 
@@ -32,10 +50,38 @@ axiom forall Q1, Q2. exists N. member(N, Q1) & member(N, Q2)
 # is this node the primary node of the specified view?
 # in a real implementation, this is implemented as something like view `mod` |node|.
 immutable relation primary_of_view(node, view)
-axiom primary_of_view(M, V) & primary_of_view(N, V) -> M = N
+axiom primary_of_view(M, V) & primary_of_view(N, V) -> M = N # uniqueness of primary
+
+# the current view of the node
+mutable function installed_view(node): view
 
 # the state of the node in the given view
 mutable function node_state(node, view): state
+
+# is the node in the normal state in its current view?
+twostate definition in_normal_state(n: node) =
+  eq(old(node_state(n, installed_view(n))), normal_state)
+
+## Normal Mode Relations
+
+# the node has received the given request
+mutable relation received_req(node, req)
+
+# the node already learned the response for this request
+mutable relation known(node, req, resp)
+
+# the node has sent Prepare for the given request in the given view
+mutable relation sent_prepare(node, view, req)
+
+# the node has sent PrepareOk for the given request in the given view
+mutable relation sent_prepare_ok(node, view, req)
+# a quorum has been reached for PrepareOk messages for the request in the given view
+mutable function prepare_ok_quorum(view, req): quorum
+
+# the node sent a commit message for the given request and response in the given view
+mutable relation sent_commit(node, view, req, resp)
+
+## View Change Relations
 
 # the node has sent StartViewChange for the view
 mutable relation sent_start_vc(node, view)
@@ -47,27 +93,92 @@ mutable relation sent_do_vc(node, view)
 # a quorum has been reached for DoViewChange to view
 mutable function do_vc_quorum(view): quorum
 
+# the node has sent a StartView for the view
 mutable relation sent_start_view(node, view)
 
 ####################
 ## Initialization ##
 ####################
 
+# every node has the initial view installed
+init installed_view(N) = initial_view
 # every node is in the normal state
 init node_state(N, initial_view) = normal_state
+
+# nobody has received any requests
+init !received_req(N, R)
+# nobody knows any responses to any requests
+init !known(N, REQ, RESP)
+
+# nobody has sent a Prepare
+init !sent_prepare(N, V, R)
+# nobody has sent a PrepareOk
+init !sent_prepare_ok(N, V, R)
+# nobody has sent a Commit
+init !sent_commit(N, V, REQ, RESP)
+
 # nobody has sent a StartViewChange
 init !sent_start_vc(N, V)
 # nobody has sent a DoViewChange
 init !sent_do_vc(N, V)
+# nobody has sent a StartView
+init !sent_start_view(N, V)
 
 #################
-## Transitions ##
+## Normal Mode ##
+#################
+
+# a node can receive a request at any time
+transition receive_req(n: node, r: req)
+  modifies received_req
+  (forall N, R. received_req(N, R) <-> old(received_req(N, R)) | N = n & R = r)
+
+# a node can send a prepare if it is the primary of the view, doesn't already know the response,
+# and is in a normal state
+transition send_prepare(n: node, r: req)
+  modifies sent_prepare
+  primary_of_view(n, old(installed_view(n))) &
+  !exists R. old(known(n, r, R)) &
+  (forall N, R.
+    sent_prepare(N, old(installed_view(n)), R) <-> old(sent_prepare(N, installed_view(n), R)) |
+    N = n & R = r & in_normal_state(n))
+
+# a node can process a sent prepare if it is not the primary of the view, and is in a normal state
+transition process_prepare(n: node)
+  modifies sent_prepare_ok
+  !primary_of_view(n, old(installed_view(n))) &
+  (forall N1, R.
+    sent_prepare_ok(N1, old(installed_view(N1)), R) <->
+      old(sent_prepare_ok(N1, installed_view(N1), R)) |
+      exists N2, REQ.
+        old(sent_prepare(N2, installed_view(N1), REQ)) & N1 = n & R = REQ & in_normal_state(n))
+
+# if we have a quorum of prepare_ok messages, then the primary of the view can send a commit message
+transition commit(v: view, req: req, resp: resp, q: quorum)
+  modifies sent_commit, prepare_ok_quorum
+  (forall N. member(N, q) -> old(sent_prepare_ok(N, v, req))) &
+  (forall N, REQ, RESP.
+    sent_commit(N, old(installed_view(N)), REQ, RESP) <->
+      old(sent_commit(N, installed_view(N), REQ, RESP)) |
+      primary_of_view(N, v) & REQ = req & resp = RESP) &
+  prepare_ok_quorum(v, req) = q
+
+# any node can learn the appropriate response for any request with a committed response
+transition learn(n: node)
+  modifies known
+  (forall N, V, REQ, RESP.
+    known(N, REQ, RESP) <-> old(known(N, REQ, RESP)) |
+    N = n & le(V, old(installed_view(n))) & old(sent_commit(N, V, REQ, RESP)))
+
+#################
+## View Change ##
 #################
 
 # we can always transition by having a node decide to start a view change, regardless of state
 # this corresponds to a replica sending out a StartViewChange message because of a timeout
 transition send_start_view_change(n: node, v: view)
   modifies sent_start_vc, node_state
+  le(old(installed_view(n)), v) &
   (forall N, V. sent_start_vc(N, V) <-> old(sent_start_vc(N, V)) | N = n & V = v) &
   node_state(n, v) = vc_state
 
@@ -99,5 +210,7 @@ transition send_start_view(n: node, v: view)
 
 # when we have a majority of nodes having sent a StartView, we can finally start the new view!
 transition start_view(v: view, q: quorum)
-  modifies node_state
-  (forall N. member(N, q) -> old(sent_do_vc(N, v)) & node_state(N, v) = normal_state)
+  modifies installed_view, node_state
+  (forall N.
+    member(N, q) -> old(sent_do_vc(N, v)) &
+    installed_view(N) = v & node_state(N, v) = normal_state)
