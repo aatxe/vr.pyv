@@ -21,8 +21,10 @@ immutable constant initial_view: view
 immutable constant normal_state: state
 immutable constant vc_state: state
 
-immutable relation eq(state, state)
-axiom eq(A, A) # reflexivity
+# each node state is distinct
+axiom normal_state != vc_state
+# node states are a finite enumeration
+axiom forall S. S = normal_state | S = vc_state
 
 immutable relation le(view, view)
 
@@ -44,7 +46,6 @@ axiom le_req(A, B) | le_req(B, A) # connexity
 immutable relation member(node, quorum)
 
 # there is always a common node between two quorums
-# thus, every quorum must consist of a simple majority of nodes
 axiom forall Q1, Q2. exists N. member(N, Q1) & member(N, Q2)
 
 # is this node the primary node of the specified view?
@@ -59,8 +60,8 @@ mutable function installed_view(node): view
 mutable function node_state(node, view): state
 
 # is the node in the normal state in its current view?
-twostate definition in_normal_state(n: node) =
-  eq(old(node_state(n, installed_view(n))), normal_state)
+definition in_normal_state(n: node) =
+  node_state(n, installed_view(n)) = normal_state
 
 ## Normal Mode Relations
 
@@ -141,7 +142,7 @@ transition send_prepare(n: node, r: req)
   !exists R. old(known(n, r, R)) &
   (forall N, R.
     sent_prepare(N, old(installed_view(n)), R) <-> old(sent_prepare(N, installed_view(n), R)) |
-    N = n & R = r & in_normal_state(n))
+    N = n & R = r & old(in_normal_state(n)))
 
 # a node can process a sent prepare if it is not the primary of the view, and is in a normal state
 transition process_prepare(n: node)
@@ -151,7 +152,7 @@ transition process_prepare(n: node)
     sent_prepare_ok(N1, old(installed_view(N1)), R) <->
       old(sent_prepare_ok(N1, installed_view(N1), R)) |
       exists N2, REQ.
-        old(sent_prepare(N2, installed_view(N1), REQ)) & N1 = n & R = REQ & in_normal_state(n))
+        old(sent_prepare(N2, installed_view(N1), REQ)) & N1 = n & R = REQ & old(in_normal_state(n)))
 
 # if we have a quorum of prepare_ok messages, then the primary of the view can send a commit message
 transition commit(v: view, req: req, resp: resp, q: quorum)
