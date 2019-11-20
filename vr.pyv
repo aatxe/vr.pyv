@@ -139,10 +139,10 @@ transition receive_req(n: node, r: req)
 transition send_prepare(n: node, r: req)
   modifies sent_prepare
   primary_of_view(n, old(installed_view(n))) &
-  !exists R. old(known(n, r, R)) &
-  (forall N, R.
-    sent_prepare(N, old(installed_view(n)), R) <-> old(sent_prepare(N, installed_view(n), R)) |
-    N = n & R = r & old(in_normal_state(n)))
+  (!exists R. old(known(n, r, R))) &
+  (forall N, V, R.
+    sent_prepare(N, V, R) <-> old(sent_prepare(N, V, R)) |
+    N = n & V = old(installed_view(n)) & R = r & old(in_normal_state(n)))
 
 # a node can process a sent prepare if it is not the primary of the view, and is in a normal state
 transition process_prepare(n: node)
@@ -162,7 +162,9 @@ transition commit(v: view, req: req, resp: resp, q: quorum)
     sent_commit(N, old(installed_view(N)), REQ, RESP) <->
       old(sent_commit(N, installed_view(N), REQ, RESP)) |
       primary_of_view(N, v) & REQ = req & resp = RESP) &
-  prepare_ok_quorum(v, req) = q
+  prepare_ok_quorum(v, req) = q &
+  (forall V, R.
+    !(V = v & R = req) -> prepare_ok_quorum(V, R) = old(prepare_ok_quorum(V, R))
 
 # any node can learn the appropriate response for any request with a committed response
 transition learn(n: node)
@@ -181,13 +183,15 @@ transition send_start_view_change(n: node, v: view)
   modifies sent_start_vc, node_state
   le(old(installed_view(n)), v) &
   (forall N, V. sent_start_vc(N, V) <-> old(sent_start_vc(N, V)) | N = n & V = v) &
-  node_state(n, v) = vc_state
+  node_state(n, v) = vc_state &
+  (forall N, V. !(N = n & V = v) -> node_state(N, V) = old(node_state(N, V)))
 
 # when we have a majority of nodes having sent a StartViewChange, we can actually start one!
 transition start_view_change(v: view, q: quorum)
   modifies start_vc_quorum
   (forall N. member(N, q) -> old(sent_start_vc(N, v))) &
-  start_vc_quorum(v) = q
+  start_vc_quorum(v) = q &
+  (forall V. V != v -> start_vc_quorum(V) = old(start_vc_quorum(V)))
 
 # a node recognizes the quorum of sent_view_change and indicates the view change should be performed
 # this corresponds to a replica sending out a DoViewChange message
@@ -200,7 +204,8 @@ transition send_do_view_change(n: node, v: view)
 transition do_view_change(v: view, q: quorum)
   modifies do_vc_quorum
   (forall N. member(N, q) -> old(sent_do_vc(N, v))) &
-  do_vc_quorum(v) = q
+  do_vc_quorum(v) = q &
+  (forall V. V != v -> do_vc_quorum(V) = old(do_vc_quorum(V)))
 
 # if we have a quorum of DoViewChange messages, the node can actually move to the new view
 # this corresponds to a replica sending out a StartView message
