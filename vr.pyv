@@ -213,9 +213,13 @@ transition do_view_change(v: view, q: quorum)
 # if we have a quorum of DoViewChange messages, the node can actually move to the new view
 # this corresponds to a replica sending out a StartView message
 transition send_start_view(n: node, v: view)
-  modifies sent_start_view
+  modifies sent_start_view, sent_commit
   member(n, old(do_vc_quorum(v))) &
-  (forall N, V. sent_start_view(N, V) <-> old(sent_start_view(N, V)) | N = n & V = v)
+  (forall N, V. sent_start_view(N, V) <-> old(sent_start_view(N, V)) | N = n & V = v) &
+  # we must propagate commits from the old view into the new view
+  (forall N, V, REQ, RESP.
+    sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP)) |
+    exists OLDV. V = v & lt(OLDV, V) & old(sent_commit(N, OLDV, REQ, RESP)))
 
 # when we have a majority of nodes having sent a StartView, we can finally start the new view!
 transition start_view(v: view, q: quorum)
