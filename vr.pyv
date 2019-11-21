@@ -34,6 +34,9 @@ axiom le(A, B) & le(B, A) -> A = B # antisymmetry
 axiom le(A, B) & le(B, C) -> le(A, C) # transitivity
 axiom le(A, B) | le(B, A) # connexity
 
+derived relation lt(view, view):
+  lt(V1, V2) <-> le(V1, V2) & V1 != V2
+
 immutable relation le_req(req, req)
 
 # le_req is a total ordering
@@ -157,14 +160,14 @@ transition process_prepare(n: node)
 # if we have a quorum of prepare_ok messages, then the primary of the view can send a commit message
 transition commit(v: view, req: req, resp: resp, q: quorum)
   modifies sent_commit, prepare_ok_quorum
-  (forall N. member(N, q) -> old(sent_prepare_ok(N, v, req))) &
-  (forall N, REQ, RESP.
-    sent_commit(N, old(installed_view(N)), REQ, RESP) <->
-      old(sent_commit(N, installed_view(N), REQ, RESP)) |
-      primary_of_view(N, v) & REQ = req & resp = RESP) &
+  (forall N. member(N, q) -> old(sent_prepare_ok(N, v, req)) & old(installed_view(N)) = v) &
+  (forall N, V, REQ, RESP.
+    sent_commit(N, V, REQ, RESP) <->
+      old(sent_commit(N, V, REQ, RESP)) |
+      primary_of_view(N, V) & V = v & REQ = req & resp = RESP) &
   prepare_ok_quorum(v, req) = q &
   (forall V, R.
-    !(V = v & R = req) -> prepare_ok_quorum(V, R) = old(prepare_ok_quorum(V, R))
+    !(V = v & R = req) -> prepare_ok_quorum(V, R) = old(prepare_ok_quorum(V, R)))
 
 # any node can learn the appropriate response for any request with a committed response
 transition learn(n: node)
@@ -197,7 +200,7 @@ transition start_view_change(v: view, q: quorum)
 # this corresponds to a replica sending out a DoViewChange message
 transition send_do_view_change(n: node, v: view)
   modifies sent_do_vc
-  member(n, old(start_vc_quorum(v))) & 
+  member(n, old(start_vc_quorum(v))) &
   (forall N, V. sent_do_vc(N, V) <-> old(sent_do_vc(N, V)) | N = n & V = v)
 
 # when we have a majority of nodes having sent a DoViewChange, we can actually do one!
@@ -220,3 +223,11 @@ transition start_view(v: view, q: quorum)
   (forall N.
     member(N, q) -> old(sent_do_vc(N, v)) &
     installed_view(N) = v & node_state(N, v) = normal_state)
+
+# safety of normal mode: a node never forgets that a value has been committed
+safety
+  sent_commit(N, V, REQ, RESP) -> sent_commit(N, V, REQ, RESP)
+
+# safety of view change: commits are preserved in later views
+safety
+  sent_commit(N, V1, REQ, RESP) & lt(V1, V2) -> sent_commit(N, V2, REQ, RESP)
