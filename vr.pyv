@@ -222,11 +222,10 @@ transition send_start_view(n: node, v: view)
     V = v & (exists OLDV. lt(OLDV, V) & old(sent_commit(N, OLDV, REQ, RESP))))
 
 # when we have a majority of nodes having sent a StartView, we can finally start the new view!
-transition start_view(v: view, q: quorum)
+transition start_view(n: node, v: view, q: quorum)
   modifies installed_view, node_state
-  (forall N.
-    member(N, q) -> old(sent_do_vc(N, v)) &
-    installed_view(N) = v & node_state(N, v) = normal_state)
+    member(n, q) ->
+      old(sent_do_vc(N, v)) & installed_view(n) = v & node_state(n, v) = normal_state
 
 # safety of normal mode: a node never forgets that a value has been committed
 safety
