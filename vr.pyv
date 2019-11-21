@@ -34,8 +34,8 @@ axiom le(A, B) & le(B, A) -> A = B # antisymmetry
 axiom le(A, B) & le(B, C) -> le(A, C) # transitivity
 axiom le(A, B) | le(B, A) # connexity
 
-derived relation lt(view, view):
-  lt(V1, V2) <-> le(V1, V2) & V1 != V2
+immutable relation lt(view, view)
+axiom lt(V1, V2) <-> le(V1, V2) & V1 != V2 # non-reflexive version of le
 
 immutable relation le_req(req, req)
 
