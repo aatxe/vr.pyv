@@ -219,7 +219,7 @@ transition send_start_view(n: node, v: view)
   # we must propagate commits from the old view into the new view
   (forall N, V, REQ, RESP.
     sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP)) |
-    exists OLDV. V = v & lt(OLDV, V) & old(sent_commit(N, OLDV, REQ, RESP)))
+    V = v & (exists OLDV. lt(OLDV, V) & old(sent_commit(N, OLDV, REQ, RESP))))
 
 # when we have a majority of nodes having sent a StartView, we can finally start the new view!
 transition start_view(v: view, q: quorum)
