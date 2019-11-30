@@ -241,5 +241,5 @@ safety
 
 # safety of view change: commits are preserved into later views
 safety
-  sent_commit(N, V1, REQ, RESP) & lt(V1, V2) & (exists N. installed_view(N) = V2) ->
+  sent_commit(N, V1, REQ, RESP) & lt(V1, V2) ->
   sent_commit(N, V2, REQ, RESP)
