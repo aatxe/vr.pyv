@@ -54,6 +54,8 @@ axiom forall Q1, Q2. exists N. member(N, Q1) & member(N, Q2)
 # is this node the primary node of the specified view?
 # in a real implementation, this is implemented as something like view `mod` |node|.
 immutable relation primary_of_view(node, view)
+
+axiom exists N. primary_of_view(N, V) # existence of a primary for every view
 axiom primary_of_view(M, V) & primary_of_view(N, V) -> M = N # uniqueness of primary
 
 # the current view of the node
@@ -168,11 +170,10 @@ transition commit_ready(v: view, r: req, q: quorum)
 # if the primary is ready, it can send a commit whenever it wants
 transition commit(n: node, v: view, req: req, resp: resp)
   modifies sent_commit
-  primary_of_view(n, v) &
   member(n, old(prepare_ok_quorum(V, R))) &
   (forall N, V, REQ, RESP.
     sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP) |
-    N = n & lt(v, V) & REQ = req & RESP = resp))
+    N = n & primary_of_view(N, v) & le(v, V) & REQ = req & RESP = resp))
 
 # any node can learn the appropriate response for any request with a committed response
 transition learn(n: node)
@@ -234,6 +235,11 @@ transition start_view(n: node, v: view, q: quorum)
     (forall N, V, REQ, RESP.
       sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP)) |
       (exists VOLD. old(sent_commit(N, VOLD, REQ, RESP) & lt(VOLD, V))))
+
+# safety of normal mode: every commit is sent by the primary of that view or came from an older view
+safety
+  sent_commit(N, V, REQ, RESP) -> primary_of_view(N, V) |
+  exists VOLD. sent_commit(N, VOLD, REQ, RESP) & primary_of_view(N, VOLD)
 
 # safety of normal mode: a node never forgets that a value has been committed
 safety
