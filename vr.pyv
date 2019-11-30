@@ -158,17 +158,21 @@ transition process_prepare(n: node)
         old(sent_prepare(N2, V, REQ)) &
         N1 = n & V = old(installed_view(N1)) & R = REQ & old(in_normal_state(N1)))
 
-# if we have a quorum of prepare_ok messages, then the primary of the view can send a commit message
-transition commit(v: view, req: req, resp: resp, q: quorum)
-  modifies sent_commit, prepare_ok_quorum
-  (forall N. member(N, q) -> old(sent_prepare_ok(N, v, req)) & old(installed_view(N)) = v) &
+# if we have a quorum of prepare_ok messages, then the primary of the view is ready to send a commit
+transition commit_ready(v: view, r: req, q: quorum)
+  modifies prepare_ok_quorum
+  (forall N. member(N, q) -> old(sent_prepare_ok(N, v, r)) & old(installed_view(N)) = v) &
+  (forall V, R, Q.
+    prepare_ok_quorum(V, R) = Q <-> old(prepare_ok_quorum(V, R)) = Q | V = v & R = r & Q = q)
+
+# if the primary is ready, it can send a commit whenever it wants
+transition commit(n: node, v: view, req: req, resp: resp)
+  modifies sent_commit
+  primary_of_view(n, v) &
+  member(n, old(prepare_ok_quorum(V, R))) &
   (forall N, V, REQ, RESP.
-    sent_commit(N, V, REQ, RESP) <->
-      old(sent_commit(N, V, REQ, RESP)) |
-      primary_of_view(N, V) & V = v & REQ = req & resp = RESP) &
-  prepare_ok_quorum(v, req) = q &
-  (forall V, R.
-    !(V = v & R = req) -> prepare_ok_quorum(V, R) = old(prepare_ok_quorum(V, R)))
+    sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP) |
+    N = n & lt(v, V) & REQ = req & RESP = resp))
 
 # any node can learn the appropriate response for any request with a committed response
 transition learn(n: node)
@@ -217,22 +221,25 @@ transition send_start_view(n: node, v: view)
   modifies sent_start_view, sent_commit
   member(n, old(do_vc_quorum(v))) &
   (forall N, V. sent_start_view(N, V) <-> old(sent_start_view(N, V)) | N = n & V = v) &
-  # we must propagate commits from the old view into the new view
+  # we must propagate commits from old views into the new views
   (forall N, V, REQ, RESP.
     sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP)) |
     V = v & (exists OLDV. lt(OLDV, V) & old(sent_commit(N, OLDV, REQ, RESP))))
 
 # when we have a majority of nodes having sent a StartView, we can finally start the new view!
 transition start_view(n: node, v: view, q: quorum)
-  modifies installed_view, node_state
-    member(n, q) ->
-      old(sent_do_vc(N, v)) & installed_view(n) = v & node_state(n, v) = normal_state
+  modifies sent_commit, installed_view, node_state
+    (member(n, q) ->
+      old(sent_do_vc(N, v)) & installed_view(n) = v & node_state(n, v) = normal_state) &
+    (forall N, V, REQ, RESP.
+      sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP)) |
+      (exists VOLD. old(sent_commit(N, VOLD, REQ, RESP) & lt(VOLD, V))))
 
 # safety of normal mode: a node never forgets that a value has been committed
 safety
   sent_commit(N, V, REQ, RESP) -> sent_commit(N, V, REQ, RESP)
 
-# safety of view change: commits are preserved in later views
+# safety of view change: commits are preserved into later views
 safety
   sent_commit(N, V1, REQ, RESP) & lt(V1, V2) & (exists N. installed_view(N) = V2) ->
   sent_commit(N, V2, REQ, RESP)
