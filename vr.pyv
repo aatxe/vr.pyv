@@ -231,7 +231,7 @@ transition send_start_view(n: node, v: view)
 transition start_view(n: node, v: view, q: quorum)
   modifies sent_commit, installed_view, node_state
     (member(n, q) ->
-      old(sent_do_vc(N, v)) & installed_view(n) = v & node_state(n, v) = normal_state) &
+      old(sent_start_view(n, v)) & installed_view(n) = v & node_state(n, v) = normal_state) &
     (forall N, V, REQ, RESP.
       sent_commit(N, V, REQ, RESP) <-> old(sent_commit(N, V, REQ, RESP)) |
       (exists VOLD. old(sent_commit(N, VOLD, REQ, RESP) & lt(VOLD, V))))
@@ -239,7 +239,7 @@ transition start_view(n: node, v: view, q: quorum)
 # safety of normal mode: every commit is sent by the primary of that view or came from an older view
 safety
   sent_commit(N, V, REQ, RESP) -> primary_of_view(N, V) |
-  exists VOLD. sent_commit(N, VOLD, REQ, RESP) & primary_of_view(N, VOLD)
+  exists VOLD. sent_commit(N, VOLD, REQ, RESP) & primary_of_view(N, VOLD) & lt(VOLD, V)
 
 # safety of normal mode: a node never forgets that a value has been committed
 safety
